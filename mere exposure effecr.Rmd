@@ -1,0 +1,218 @@
+
+```{r setup, include=FALSE}
+
+
+library(tidyverse) # only load tidyverse (not dplyr, purrr, etc.) - code is cleaner and it gives u everything u need
+library(janitor)
+library(dplyr)
+install.packages('ggpubr')
+```
+
+
+```{r cars}
+#get columns and remove blanks in response section
+
+all_parts <- read.csv('all_participants (1).csv') # load in dataset (do not pipe directly from this line)
+
+all_parts_clean <- all_parts %>% # select only needed vars
+  clean_names() %>%  # clean names with janitor (e.g., convert :: to _)
+  rename(participant = participant_private_id, # rename participant var
+         exposure = spreadsheet_exposure_painting, # rename exposure var
+         judgement = spreadsheet_judgment_painting) %>% # rename judgement var
+  select(participant, response, object_id, exposure, judgement) %>% # select only requisite vars
+  filter(object_id != "object-51")
+
+# tbl_vars(all_parts_clean) # check tbl vars
+
+split_id <- all_parts_clean %>%
+  mutate_if(is.character, na_if, "") %>% # convert empty cells to NA
+  filter(!is.na(participant), # remove participants called "NA"
+         !if_all(c(exposure, judgement), is.na), # remove row ("!") if all specified columns ("c(spreadsheet_exposure_painting, spreadsheet_judgment_painting)") equal NA ("is.na")
+         object_id != "screen", # remove object_id == "screen"
+         !is.na(response)) %>% # remove NA responses
+  distinct(participant, exposure, judgement, .keep_all = TRUE) %>%  # keep only rows with distinct combinations of participant, exposure, & judgement variables, retain all other variables
+  select(-object_id) %>% # remove object_id var
+  mutate(exposure = str_sub(exposure, end = -8), # remove "_SU.jpg" string
+         judgement = str_sub(judgement, end = -8), # remove "_SU.jpg" string
+         exposure = as.numeric(exposure), # mutate from character to numeric vector
+         judgement = as.numeric(judgement)) # mutate from character to numeric vector
+
+split_id_exposure <- split_id %>% # create exposure-only tbl (32 rows)
+  select(-judgement) %>% # remove judgement var
+  filter(!is.na(exposure)) %>% # filter NA exposure rows
+  add_row(exposure = rep(0, 625)) # add 625 dummy rows with 0 in exposure var (for the next step) **FIGURE OUT WHERE THIS NUMBER COMES FROM TO AUTOMATE**
+
+split_id_judgement <- split_id %>% # create exposure-only tbl (64 rows)
+  filter(!is.na(judgement)) %>% # filter NA judgement rows
+  mutate(exposure = ifelse(split_id_exposure$exposure %in% judgement, judgement, 0), # create new exposure var, incorporate exposure value from split_id_exposure, give it same value as judgement if it equals judgement, else call it 0
+         match = ifelse(judgement == exposure, "match", "different")) %>%  # create match var, called "match" if exposure = judgement, else "different"
+  select(-exposure) %>% # get rid of exposure var
+  group_by(match) %>% # group by match var (comment out this and subsequent code lines to get raw data)
+  summarize(n_match = n()) %>% # summarize counts of match by level
+  ungroup() %>% # ungroup data
+  mutate(prop = round(n_match/sum(n_match), 3)) # create new var that records proportion of each response, rounded to 3 digits
+
+```
+
+
+#work on this one!
+
+```{r cars}
+all_parts_clean <- all_parts %>% # select only needed vars
+  clean_names() %>%  # clean names with janitor (e.g., convert :: to _)
+  rename(participant = participant_private_id, # rename participant var
+         exposure = spreadsheet_exposure_painting, # rename exposure var
+         judgement = spreadsheet_judgment_painting) %>% # rename judgement var
+  select(participant, response, object_id, exposure, judgement) %>% # select only requisite vars
+  filter(object_id != "object-51")
+
+# tbl_vars(all_parts_clean) # check tbl vars
+# glimpse(split_id)
+
+split_id <- all_parts_clean %>%
+  mutate_if(is.character, na_if, "") %>% # convert empty cells to NA
+  filter(!is.na(participant), # remove participants called "NA"
+         !if_all(c(exposure, judgement), is.na), # remove row ("!") if all specified columns ("c(spreadsheet_exposure_painting, spreadsheet_judgment_painting)") equal NA ("is.na")
+         object_id != "screen") %>%  # remove object_id == "screen"
+        # !is.na(response)) %>% # remove NA responses PROBLEM IDENTIFIED!!!!
+  distinct(participant, exposure, judgement, .keep_all = TRUE) %>%  # keep only rows with distinct combinations of participant, exposure, & judgement variables, retain all other variables
+  select(-object_id) %>% # remove object_id var
+  mutate(exposure  = str_sub(exposure, end = -8), # remove "_SU.jpg" string
+         judgement = str_sub(judgement, end = -8), # remove "_SU.jpg" string
+         exposure  = as.numeric(exposure), # mutate from character to numeric vector
+         judgement = as.numeric(judgement)) # mutate from character to numeric vector
+
+split_id_match <- split_id %>%
+  group_by(participant) %>% # group subsequent mutate by participant
+  mutate(match = ifelse(judgement %in% exposure, "match", "not_match")) %>% # create match var
+  ungroup() %>% # ungroup
+  filter(!is.na(judgement)) %>% # filter NAs from judgement
+  select(-exposure) # %>% # remove exposure
+  # group_by(judgement, match) %>% # group_by for stats
+  # summarize(n = n()) # stats
+
+
+```
+
+
+```{r setup, include=FALSE}
+
+
+split_rating <- split_id_match %>% 
+   mutate(match_group = ifelse(match == 'match', 'match', "no_match")) %>%
+  mutate(no_match= ifelse(match=='not_match', response, NA))%>% 
+ mutate(match= ifelse(match=='match', response, NA))
+
+
+within_painting_particpants <- split_rating %>%
+  group_by(painting, match_group) %>% 
+  summarise(average_match=mean(match, na.rm = TRUE),
+            average_nomatch = mean(no_match, na.rm = TRUE),
+            .groups = 'drop') %>%
+  mutate_at(c("average_nomatch"), funs(lead), n =1) %>% #found on internet; n=1 is the leading first cell 
+  select(-match_group) %>%
+  filter(!is.nan(average_match)) %>%
+  mutate(difference = average_match - average_nomatch) %>%
+  as.data.frame()
+
+```
+
+```{r setup, include=FALSE}
+
+
+
+library(tidyverse) 
+library(ggplot2)
+library(ggpubr)
+
+ split_id_match2 <- read.csv('data_within.csv')
+
+data <- split_id_match2
+data <- data %>%
+  rename(painting = judgement) 
+  
+split_rating3 <- data %>%
+  mutate(match_group = ifelse(match == 'match', 'match', "no_match")) %>%
+  mutate(no_match =ifelse(match == 'not_match', response, NA)) %>%
+  mutate(match = ifelse(match == 'match', response, NA))
+
+within_participants <- split_rating3 %>%
+  group_by(participant, match_group) %>% 
+  summarize(average_match=mean(match, na.rm = TRUE),
+            average_nomatch = mean(no_match, na.rm = TRUE),  .groups = 'drop') %>%
+  mutate_at(c("average_nomatch"), funs(lead), n =1) %>% #found on internet; n=1 is the leading first cell 
+  select(-match_group) %>%
+  filter(!is.nan(average_match)) %>%
+  mutate(participant_number = 1:nrow(within_participants) ) %>%
+  mutate(difference = average_match - average_nomatch) %>%
+  as.data.frame()
+
+
+
+
+
+
+within_participants$participant <- as.factor(within_participants$participant)    
+ggplot(within_participants, mapping=aes(x= participant, y=difference)) +
+  geom_col()
+
+Awithin_participant_2 <- within_participants$consecutive_numbers<-1:nrow(within_participants) 
+
+bwithin_participants <- within_participants %>% 
+  mutate(participant_number = 1:nrow(within_participants) ) %>% 
+  within_participants$participant <- as.factor(within_participants$participant) %>% 
+  ggplot(mapping=aes(x= participant, y=difference)) +
+  geom_col()
+
+within_participants %>% 
+sort(difference)
+  
+  
+  
+  within_participants$participant <- as.factor(within_participants$participant)    
+ggplot(within_participants, mapping=aes(x= participant_number, y=difference)) +
+  geom_col()
+
+
+
+
+```
+
+
+  
+
+
+```{r within-paintings-t-test, include=FALSE}
+library(tidyverse) 
+library(ggplot2)
+library(ggpubr)
+
+
+
+  
+
+sd(within_participant$difference, na.rm= TRUE)
+mean(within_participants$difference, na.rm = TRUE)
+
+within_participant$participant <- as.factor(within_participant$participant)
+
+ggplot(within_participant, mapping=aes(x= participant_number, y=difference)) +
+  geom_col()
+
+## doing a t-test of people who shifted in the positive direction for repeated paintings
+pos_scorers <- subset(within_participant, difference > 0) %>%
+  select(-average_match) %>%
+  select(-average_nomatch)
+
+pos_ttest<- merge(data, pos_scorers, by.x = "participant", by.y = "participant")
+t.test(response~match, highscorer_ttest, paired = FALSE)
+
+## doing a t-test for the people who liked the repeated paintings less 
+neg_scorers <- subset(within_participant, difference < 0) %>%
+  select(-average_match) %>%
+  select(-average_nomatch)
+neg_ttest<- merge(data, neg_scorers, by.x = "participant", by.y = "participant")
+t.test(response~match, neg_ttest, paired = FALSE)
+
+```
+
